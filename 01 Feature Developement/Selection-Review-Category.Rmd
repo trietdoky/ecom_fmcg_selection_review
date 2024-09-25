@@ -1,0 +1,817 @@
+---
+title: "Selection Review - Category"
+author: "Triet Do"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    highlight: espresso
+    number_sections: yes
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    toc_depth: 4
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  cache = FALSE,
+  echo = FALSE)
+
+options(encoding = 'UTF-8')
+source("ini.R")
+source("get_data.R")
+Today <- Sys.Date() - days(1)
+# ReviewRegion <- "SOUTH"
+# ReviewCateReport <- c("FMCG")
+# ReviewCategory <- "54412"
+#ReviewCategory <- c("Thịt, Trứng", "Cá, thuỷ hải sản", "Rau củ quả", "Trái cây", "Thực phẩm Việt", "Thực Phẩm Chế Biến Sẵn", "Đông lạnh, mát", "Thực phẩm chay")
+# ReviewCategory <- c("Sữa, bơ, phô mai", "Dầu ăn, gia vị", "Bia, đồ uống", "Bánh kẹo, giỏ quà", "Đồ hộp, đóng gói", "Gạo, mì, nông sản", "Dành cho trẻ em", "Thức ăn, đồ thú cưng", "Chăm sóc cá nhân", "Chăm sóc nhà cửa", "Gia dụng, tiện ích")
+```
+
+# OVERVIEW FOR `r ReviewRegion`
+
+```{r}
+# CATEGORY ANALYSIS
+ReviewPeriod <- "MidTerm"
+StartDate <- DatePeriod(ReviewPeriod)
+EndDate <- Sys.Date() - days(1)
+source("get_period_data.R")
+
+# SKU COUNT
+LatestSelectionSummary <- TotalSummary %>%
+  left_join(CleanSelection %>% select(Sku, IsSalable), by = "Sku") %>%
+  filter(IsSalable == TRUE,
+         CustomerGroupRegion == ReviewRegion) %>%
+  distinct(Sku, .keep_all = TRUE) %>%
+  group_by(Cate2Id, Cate2, TikingonCateReport) %>%
+  summarize(SkuCount = n()) %>%
+  ungroup() %>%
+  filter(TikingonCateReport %in% ReviewCateReport) %>%
+  mutate(Cate2 = ifelse(Cate2Id == ReviewCategory, Cate2, 'Other Category')) %>%
+  group_by(Cate2) %>%
+  summarize(SkuCount = sum(SkuCount)) %>%
+  ungroup()
+
+TotalSkuCount <- sum(LatestSelectionSummary$SkuCount[LatestSelectionSummary$Cate2 != 'Other Category'])
+
+# NMV
+NmvByCate1Month <- TotalSummary %>%
+  filter(TikingonCateReport %in% ReviewCateReport,
+         CustomerGroupRegion == ReviewRegion) %>%
+  group_by(Cate2Id, Cate2, TikingonCateReport) %>%
+  summarize(CatNmv = sum(SkuNmv)) %>%
+  ungroup() %>%
+  mutate(Cate2 = ifelse(Cate2Id == ReviewCategory, Cate2, 'Other Category')) %>%
+  group_by(Cate2) %>%
+  summarize(CatNmv = sum(CatNmv)) %>%
+  ungroup()
+
+# SKU PER WAREHOUSE
+CurrentStockStatus <- InvData %>%
+  filter(DateKey == Today) %>%
+  left_join(CleanSelection %>% select(Sku, TikingonCateReport, Cate2Id, Cate2), by = "Sku") %>%
+  filter(TikingonCateReport %in% ReviewCateReport,
+         Cate2Id == ReviewCategory) %>%
+  filter(QtyInventorySalable >0) %>%
+  group_by(WarehouseName) %>%
+  summarize(SkuPerWarehouse = n_distinct(Sku)) %>%
+  ungroup() %>%
+  mutate(WarehouseRegion = case_when(
+    WarehouseName %in% ActiveCentralWarehouse ~ 'CENTRAL',
+    WarehouseName %in% ActiveNorthWarehouse ~ 'NORTH',
+    WarehouseName %in% ActiveSouthWarehouse ~ 'SOUTH',
+    TRUE ~ 'TRANSIT'))
+
+```
+
+
+As of `r Today`, category `r ReviewCategory` of **`r ReviewCateReport`** has **`r TotalSkuCount`** salable products in the `r ReviewRegion` Region.
+
+The product quantity and NMV contribution of this category in the `r ReviewRegion`region are as followed
+
+```{r}
+h1 <- CreatePieChart(LatestSelectionSummary %>% 
+                       group_by(Cate2, SkuCount) %>%
+                       summarize(SkuCount = sum(SkuCount)), 
+                     Cate2, SkuCount) %>%
+  hc_plotOptions(pie = list(dataLabels = list(enable = TRUE, 
+                                              format = '<b>{point.name}</b> <br>{point.percentage:.1f} %'))) %>%
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_add_theme(SetThemeFontForHighcharter()) %>%
+  hc_tooltip(useHTLM = TRUE,
+             crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             pointFormat = "Percentage: <b>{point.percentage:.1f}%</b> <br>Count: <b>{point.y}SKU</b>",
+             valueDecimals = 0) %>%
+  hc_title(text = paste0("SKU Count of ", ReviewCateName, " versus Other Category")) %>%
+  hc_subtitle(text = paste0("From ", StartDate, " To ", EndDate))
+
+h2 <- CreatePieChart(NmvByCate1Month, Cate2, CatNmv) %>%
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_add_theme(SetThemeFontForHighcharter()) %>%
+  hc_tooltip(useHTLM = TRUE,
+             crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             pointFormat = "Percentage: <b>{point.percentage:.1f}%</b> <br>Value: <b>{point.y}VND</b>",
+             valueDecimals = 0) %>%
+  hc_title(text = paste0("NMV Contribution of ", ReviewCateName, " versus Other Category")) %>%
+  hc_subtitle(text = paste0("From ", StartDate, " To ", EndDate))
+
+
+hw_grid(h1, h2)
+```
+For `r ReviewCateReport`, the number of SKU per warehouse is as followed:
+
+```{r}
+hchart(CurrentStockStatus, type = 'column', hcaes(x = WarehouseName, y = SkuPerWarehouse, group = WarehouseRegion), 
+       showInLegends = TRUE) %>%
+  hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+  hc_title(text = paste0("SKU Count per Warehouse as of ", Today)) %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE)
+```
+The co-relation of NMV versus number of SKU per warehouse last 30 days is as followed,
+
+```{r}
+NmvByWH <- TotalSummary %>%
+  filter(Cate2Id == ReviewCategory) %>%
+  group_by(WarehouseName, CustomerGroupRegion) %>%
+  summarize(Nmv = sum(SkuNmv),
+            SkuCount = n_distinct(Sku)) %>%
+  ungroup()
+
+hchart(NmvByWH, type = 'column', hcaes(x = WarehouseName, y = Nmv, group = CustomerGroupRegion), 
+       showInLegends = TRUE) %>%
+  hc_add_series(data = NmvByWH, 
+                type = "spline", 
+                hcaes(x = WarehouseName, y = SkuCount, group = CustomerGroupRegion),
+                name = "SKU per Warehouse",
+                yAxis = 1,
+                showInLegends = TRUE) %>%
+  hc_yAxis_multiples(list(title = "NMV per Warehouse", 
+                          lineWidth = 3),
+                     list(title = "SKU Count per Warehouse", 
+                          showLastLabel = FALSE, opposite = TRUE)) %>%
+  hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+  hc_title(text = paste0("NMV vs SKU Count per Warehouse Last 30 Days")) %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE)
+
+```
+
+
+# Last Week Review - Last 7 Days
+
+The SKUs being reviewed in this period are (1) SKUs having available stock, (2) SKUs generating sales and (3) SKUs having shrinkage.
+
+```{r}
+ReviewPeriod <- "LastWeek"
+
+StartDate <- DatePeriod(ReviewPeriod)
+EndDate <- Sys.Date() - days(1)
+source("get_period_data.R")
+```
+
+Review period: **`r ReviewPeriod`**
+
+Review region: **`r ReviewRegion`**
+
+Review Cate Report: **`r ReviewCateReport`**
+
+From: **`r StartDate`**
+
+To: **`r EndDate`**
+
+```{r}
+
+PerformerRankAllCates <- TotalSummary %>%
+  filter(CustomerGroupRegion == ReviewRegion,
+         TikingonCateReport %in% ReviewCateReport) %>%
+  left_join(CleanSelection %>% select(Sku, Cate3Id, Cate3, Brand)) %>%
+  group_by(Sku, ProductName, Cate2Id, Cate2, Cate3) %>%
+  summarize(SkuNmv = sum(SkuNmv),
+            NmvQty = sum(NmvQty),
+            TotalCustomer = sum(TotalCustomer),
+            ReturnCustomer = max(ReturnCustomer), # returning customer within 6 months
+            ShrinkageQty = sum(ShrinkageQty),
+            ShrinkageValue = sum(ShrinkageValue),
+            AvgSalesPeriod = SkuNmv/(1+as.numeric(difftime(EndDate,StartDate, units = "day"))),
+            AvgRating = max(AvgRating),
+            TotalApprovedReview = max(TotalApprovedReview),
+            LtThreeStarsCount = min(LtThreeStarsCount),
+            ShrinkageRate = ShrinkageQty/NmvQty) %>%
+  ungroup() %>%
+  mutate(NmvContribution = SkuNmv/sum(SkuNmv)) %>%
+  ABCClassify(SkuNmv, abcRange = c(80, 95)) %>%
+  arrange(accpercentage)
+
+PerformerRankAllCates <- PerformerRankAllCates %>%
+  filter(Cate2Id == ReviewCategory)
+
+TotalSkuCatePeriodCount <- nrow(PerformerRankAllCates)
+
+```
+
+Total SKU Active in this period: `r TotalSkuCatePeriodCount`
+
+```{r}
+OverviewData <- PerformerRankAllCates %>%
+  mutate(abcclass = paste0("SKU Class ", abcclass)) %>%
+  group_by(abcclass) %>%
+  summarize(SkuCount = n())
+
+h1 <- CreatePieChart(OverviewData,
+               colX = abcclass,
+               colY = SkuCount) %>% 
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_add_theme(SetThemeFontForHighcharter()) %>%
+  hc_tooltip(useHTLM = TRUE,
+             crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             pointFormat = "Percentage: <b>{point.percentage:.1f}%</b> <br>Count: <b>{point.y}SKU</b>",
+             valueDecimals = 0)
+
+h2 <- PerformerRankAllCates %>%
+  group_by(Cate2Id, Cate2, Cate3) %>%
+  summarise(Nmv = sum(SkuNmv)) %>%
+  hchart(type = 'treemap', hcaes(x = Cate3, value = Nmv, color = Nmv)) %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_tooltip(crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             valuePrefix = str_c("</b>", "", " "),
+             valueSuffix = str_c(" ", "VND", "</b>"),
+             valueDecimals = 0)
+
+hw_grid(h1, h2)
+```
+
+## Performance
+
+### Top Performing SKUs
+```{r}
+TopPerformerAllCates <- PerformerRankAllCates %>%
+  filter(abcclass == "A")
+
+ClassACount <- nrow(TopPerformerAllCates)
+
+```
+
+There are `r ClassACount` products within this category that is in the best performing SKU group of Ngon in this period.
+
+Top 10 SKU with the best NMV contributions are as followed:
+
+```{r}
+
+FormatSummaryTable(TopPerformerAllCates %>% 
+                     select(Sku, ProductName, 
+                            NmvQty, SkuNmv, NmvContribution, 
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+
+
+```
+
+### Low Performing SKUs
+
+```{r}
+LowPerformerAllCates <- PerformerRankAllCates %>%
+  filter(SkuNmv != 0) %>%
+  arrange(desc(ShrinkageRate))
+
+ClassCWithNmvCount <- nrow(PerformerRankAllCates %>%
+  filter(abcclass == "C") %>%
+  filter(SkuNmv != 0))
+```
+
+There are `r ClassCWithNmvCount` products that is in the lower performing SKU group of this period.
+
+The next list shows the Top 10 SKU with the highest Shrinkage Rate. 
+
+*$Shrinkage Rate = Shrinkage Quantity/SellingQuantity$
+
+Shrinkage Rate measures the gap between stock discarded versus stock sold; The higher the rate, the more concerning as the business is losing cash.*
+
+```{r}
+FormatSummaryTable(LowPerformerAllCates %>% 
+                     select(Sku, ProductName, 
+                            NmvQty, SkuNmv, NmvContribution, 
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+```
+
+### Non-performing SKUs
+```{r}
+NonPerformerAllCates <- PerformerRankAllCates %>%
+  filter(SkuNmv == 0) %>%
+  arrange(desc(ShrinkageValue))
+ClassCNoNmvCount <- nrow(NonPerformerAllCates)
+NonPerformingPercentage <- paste0(round(100*ClassCNoNmvCount/TotalSkuCatePeriodCount,1),"%")
+```
+
+There are `r ClassCNoNmvCount` products within this category that generate zero NMV in this period.
+
+That's **`r NonPerformingPercentage`** of total category SKUs.
+
+Top 10 SKUs with no NMV contribution and highest shrinkage values.
+
+```{r}
+FormatSummaryTable(NonPerformerAllCates %>% 
+                     select(Sku, ProductName, 
+                            NmvQty, SkuNmv, NmvContribution, 
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+
+```
+
+## Selection Health
+
+```{r}
+ACount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'A',])
+BCount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'B',])
+CCount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'C',])
+  
+PerformerRankAllCates %>%
+  arrange(desc(SkuNmv)) %>%
+  hchart(
+    type = "column",
+    hcaes(
+      x = ProductName,
+      y = SkuNmv,
+      group = abcclass),
+    showInLegend = TRUE) %>%
+  hc_add_series(name = "Accumulated Contribution", data = PerformerRankAllCates$accpercentage, 
+                type = "line",
+                yAxis = 1,
+                showInLegends = TRUE,
+                color = "#323232") %>%
+  hc_xAxis(categories = PerformerRankAllCates$ProductName,
+             title = "Product Name") %>%
+  hc_yAxis_multiples(list(title = "SKU NMV", 
+                          lineWidth = 3, max = 1.01*max(PerformerRankAllCates$SkuNmv), min = 0),
+                     list(title = "Accumulated Contribution", 
+                          showLastLabel = FALSE, opposite = TRUE, max = 100, min = 0)) %>%
+  hc_xAxis(plotBands = list(list(from = -0.5, to = ACount - 0.5, color = "rgba(128, 128, 128, 0.5)",
+           label = list(text = paste0("A class <br>", ACount, "Products"))),
+      list(from = ACount - 0.5, to = ACount + BCount - 0.5, color = "rgba(128, 128, 128, 0.3)",
+           label = list(text = paste0("B class <br>",  BCount, " Products"))),
+      list(from = ACount + BCount - 0.5, to = ACount + BCount + CCount, color = "rgba(128, 128, 128, 0.1)",
+           label = list(text = paste0("C class <br>",  CCount, " Products"))))) %>%
+  hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+  hc_title(text = "Selection Health - ABC Analysis") %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_colors(c( "#CB333B",  "#0074BC", "#FFCC32", "#7A121C", "#F37032", "#193661",
+               "#EFC1C4",  "#66ABD6", "#FFE084", "#AF7076", "#F7A984", "#7586A0",
+               "#DF8489",  "#004570", "#997A1E", "#490A10", "#91431E", "#0F203A" ))
+  
+```
+
+# Short Term Review - Last 14 days
+
+The SKUs being reviewed in this period are (1) SKUs having available stock, (2) SKUs generating sales and (3) SKUs having shrinkage.
+
+```{r}
+ReviewPeriod <- "ShortTerm"
+
+StartDate <- DatePeriod(ReviewPeriod)
+EndDate <- Sys.Date() - days(1)
+source("get_period_data.R")
+```
+
+Review period: **`r ReviewPeriod`**
+
+Review region: **`r ReviewRegion`**
+
+Review Cate Report: **`r ReviewCateReport`**
+
+From: **`r StartDate`**
+
+To: **`r EndDate`**
+
+```{r}
+
+PerformerRankAllCates <- TotalSummary %>%
+  filter(CustomerGroupRegion == ReviewRegion,
+         TikingonCateReport %in% ReviewCateReport) %>%
+  left_join(CleanSelection %>% select(Sku, Cate3Id, Cate3, Brand)) %>%
+  group_by(Sku, ProductName, Cate2Id, Cate2, Cate3) %>%
+  summarize(SkuNmv = sum(SkuNmv),
+            NmvQty = sum(NmvQty),
+            TotalCustomer = sum(TotalCustomer),
+            ReturnCustomer = max(ReturnCustomer), # returning customer within 6 months
+            ShrinkageQty = sum(ShrinkageQty),
+            ShrinkageValue = sum(ShrinkageValue),
+            AvgSalesPeriod = SkuNmv/(1+as.numeric(difftime(EndDate,StartDate, units = "day"))),
+            AvgRating = max(AvgRating),
+            TotalApprovedReview = max(TotalApprovedReview),
+            LtThreeStarsCount = min(LtThreeStarsCount),
+            ShrinkageRate = ShrinkageQty/NmvQty) %>%
+  ungroup() %>%
+  mutate(NmvContribution = SkuNmv/sum(SkuNmv)) %>%
+  ABCClassify(SkuNmv, abcRange = c(80, 95)) %>%
+  arrange(accpercentage)
+
+PerformerRankAllCates <- PerformerRankAllCates %>%
+  filter(Cate2Id == ReviewCategory)
+
+TotalSkuCatePeriodCount <- nrow(PerformerRankAllCates)
+
+```
+
+Total SKU Active in this period: `r TotalSkuCatePeriodCount`
+
+```{r}
+OverviewData <- PerformerRankAllCates %>%
+  mutate(abcclass = paste0("SKU Class ", abcclass)) %>%
+  group_by(abcclass) %>%
+  summarize(SkuCount = n())
+
+h1 <- CreatePieChart(OverviewData,
+               colX = abcclass,
+               colY = SkuCount) %>% 
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_add_theme(SetThemeFontForHighcharter()) %>%
+  hc_tooltip(useHTLM = TRUE,
+             crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             pointFormat = "Percentage: <b>{point.percentage:.1f}%</b> <br>Count: <b>{point.y}SKU</b>",
+             valueDecimals = 0)
+
+h2 <- PerformerRankAllCates %>%
+  group_by(Cate2Id, Cate2, Cate3) %>%
+  summarise(Nmv = sum(SkuNmv)) %>%
+  hchart(type = 'treemap', hcaes(x = Cate3, value = Nmv, color = Nmv)) %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_tooltip(crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             valuePrefix = str_c("</b>", "", " "),
+             valueSuffix = str_c(" ", "VND", "</b>"),
+             valueDecimals = 0)
+
+hw_grid(h1, h2)
+```
+
+## Performance
+
+### Top Performing SKUs
+```{r}
+TopPerformerAllCates <- PerformerRankAllCates %>%
+  filter(abcclass == "A")
+
+ClassACount <- nrow(TopPerformerAllCates)
+
+```
+
+There are `r ClassACount` products within this category that is in the best performing SKU group of Ngon in this period.
+
+Top 10 SKU with the best NMV contributions are as followed:
+
+```{r}
+
+FormatSummaryTable(TopPerformerAllCates %>% 
+                     select(Sku, ProductName, 
+                            NmvQty, SkuNmv, NmvContribution, 
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+
+
+```
+
+### Low Performing SKUs
+
+```{r}
+LowPerformerAllCates <- PerformerRankAllCates %>%
+  filter(SkuNmv != 0) %>%
+  arrange(desc(ShrinkageRate))
+
+ClassCWithNmvCount <- nrow(PerformerRankAllCates %>%
+  filter(abcclass == "C") %>%
+  filter(SkuNmv != 0))
+```
+
+There are `r ClassCWithNmvCount` products that is in the lower performing SKU group of this period.
+
+The next list shows the Top 10 SKU with the highest Shrinkage Rate. 
+
+*$Shrinkage Rate = Shrinkage Quantity/SellingQuantity$
+
+Shrinkage Rate measures the gap between stock discarded versus stock sold; The higher the rate, the more concerning as the business is losing cash.*
+
+```{r}
+FormatSummaryTable(LowPerformerAllCates %>% 
+                     select(Sku, ProductName, 
+                            NmvQty, SkuNmv, NmvContribution, 
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+```
+
+### Non-performing SKUs
+```{r}
+NonPerformerAllCates <- PerformerRankAllCates %>%
+  filter(SkuNmv == 0) %>%
+  arrange(desc(ShrinkageValue))
+ClassCNoNmvCount <- nrow(NonPerformerAllCates)
+NonPerformingPercentage <- paste0(round(100*ClassCNoNmvCount/TotalSkuCatePeriodCount,1),"%")
+```
+
+There are `r ClassCNoNmvCount` products within this category that generate zero NMV in this period.
+
+That's **`r NonPerformingPercentage`** of total category SKUs.
+
+Top 10 SKUs with no NMV contribution and highest shrinkage values.
+
+```{r}
+FormatSummaryTable(NonPerformerAllCates %>% 
+                     select(Sku, ProductName, 
+                            NmvQty, SkuNmv, NmvContribution, 
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+
+```
+
+## Selection Health
+
+```{r}
+ACount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'A',])
+BCount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'B',])
+CCount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'C',])
+  
+PerformerRankAllCates %>%
+  arrange(desc(SkuNmv)) %>%
+  hchart(
+    type = "column",
+    hcaes(
+      x = ProductName,
+      y = SkuNmv,
+      group = abcclass),
+    showInLegend = TRUE) %>%
+  hc_add_series(name = "Accumulated Contribution", data = PerformerRankAllCates$accpercentage, 
+                type = "line",
+                yAxis = 1,
+                showInLegends = TRUE,
+                color = "#323232") %>%
+  hc_xAxis(categories = PerformerRankAllCates$ProductName,
+             title = "Product Name") %>%
+  hc_yAxis_multiples(list(title = "SKU NMV", 
+                          lineWidth = 3, max = 1.01*max(PerformerRankAllCates$SkuNmv), min = 0),
+                     list(title = "Accumulated Contribution", 
+                          showLastLabel = FALSE, opposite = TRUE, max = 100, min = 0)) %>%
+  hc_xAxis(plotBands = list(list(from = -0.5, to = ACount - 0.5, color = "rgba(128, 128, 128, 0.5)",
+           label = list(text = paste0("A class <br>", ACount, "Products"))),
+      list(from = ACount - 0.5, to = ACount + BCount - 0.5, color = "rgba(128, 128, 128, 0.3)",
+           label = list(text = paste0("B class <br>",  BCount, " Products"))),
+      list(from = ACount + BCount - 0.5, to = ACount + BCount + CCount, color = "rgba(128, 128, 128, 0.1)",
+           label = list(text = paste0("C class <br>",  CCount, " Products"))))) %>%
+  hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+  hc_title(text = "Selection Health - ABC Analysis") %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_colors(c( "#CB333B",  "#0074BC", "#FFCC32", "#7A121C", "#F37032", "#193661",
+               "#EFC1C4",  "#66ABD6", "#FFE084", "#AF7076", "#F7A984", "#7586A0",
+               "#DF8489",  "#004570", "#997A1E", "#490A10", "#91431E", "#0F203A" ))
+  
+```
+
+# Mid Term Review - 1 Month
+
+The SKUs being reviewed in this period are (1) SKUs having available stock, (2) SKUs generating sales and (3) SKUs having shrinkage.
+
+```{r}
+ReviewPeriod <- "MidTerm"
+
+StartDate <- DatePeriod(ReviewPeriod)
+EndDate <- Sys.Date() - days(1)
+source("get_period_data.R")
+```
+
+Review period: **`r ReviewPeriod`**
+
+Review region: **`r ReviewRegion`**
+
+Review Cate Report: **`r ReviewCateReport`**
+
+From: **`r StartDate`**
+
+To: **`r EndDate`**
+
+```{r}
+
+PerformerRankAllCates <- TotalSummary %>%
+  filter(CustomerGroupRegion == ReviewRegion,
+         TikingonCateReport %in% ReviewCateReport) %>%
+  left_join(CleanSelection %>% select(Sku, Cate3Id, Cate3, Brand)) %>%
+  group_by(Sku, ProductName, Cate2Id, Cate2, Cate3) %>%
+  summarize(SkuNmv = sum(SkuNmv),
+            NmvQty = sum(NmvQty),
+            TotalCustomer = sum(TotalCustomer),
+            ReturnCustomer = max(ReturnCustomer), # returning customer within 6 months
+            ShrinkageQty = sum(ShrinkageQty),
+            ShrinkageValue = sum(ShrinkageValue),
+            AvgSalesPeriod = SkuNmv/(1+as.numeric(difftime(EndDate,StartDate, units = "day"))),
+            AvgRating = max(AvgRating),
+            TotalApprovedReview = max(TotalApprovedReview),
+            LtThreeStarsCount = min(LtThreeStarsCount),
+            ShrinkageRate = ShrinkageQty/NmvQty) %>%
+  ungroup() %>%
+  mutate(NmvContribution = SkuNmv/sum(SkuNmv)) %>%
+  ABCClassify(SkuNmv, abcRange = c(80, 95)) %>%
+  arrange(accpercentage)
+
+PerformerRankAllCates <- PerformerRankAllCates %>%
+  filter(Cate2Id == ReviewCategory)
+
+TotalSkuCatePeriodCount <- nrow(PerformerRankAllCates)
+
+```
+
+Total SKU Active in this period: `r TotalSkuCatePeriodCount`
+
+```{r}
+OverviewData <- PerformerRankAllCates %>%
+  mutate(abcclass = paste0("SKU Class ", abcclass)) %>%
+  group_by(abcclass) %>%
+  summarize(SkuCount = n())
+
+h1 <- CreatePieChart(OverviewData,
+               colX = abcclass,
+               colY = SkuCount) %>% 
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_add_theme(SetThemeFontForHighcharter()) %>%
+  hc_tooltip(useHTLM = TRUE,
+             crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             pointFormat = "Percentage: <b>{point.percentage:.1f}%</b> <br>Count: <b>{point.y}SKU</b>",
+             valueDecimals = 0)
+
+h2 <- PerformerRankAllCates %>%
+  group_by(Cate2Id, Cate2, Cate3) %>%
+  summarise(Nmv = sum(SkuNmv)) %>%
+  hchart(type = 'treemap', hcaes(x = Cate3, value = Nmv, color = Nmv)) %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_tooltip(crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             valuePrefix = str_c("</b>", "", " "),
+             valueSuffix = str_c(" ", "VND", "</b>"),
+             valueDecimals = 0)
+
+hw_grid(h1, h2)
+```
+
+## Performance
+
+### Top Performing SKUs
+```{r}
+TopPerformerAllCates <- PerformerRankAllCates %>%
+  filter(abcclass == "A")
+
+ClassACount <- nrow(TopPerformerAllCates)
+
+```
+
+There are `r ClassACount` products within this category that is in the best performing SKU group of Ngon in this period.
+
+Top 10 SKU with the best NMV contributions are as followed:
+
+```{r}
+
+FormatSummaryTable(TopPerformerAllCates %>% 
+                     select(Sku, ProductName, 
+                            NmvQty, SkuNmv, NmvContribution, 
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+
+
+```
+
+### Low Performing SKUs
+
+```{r}
+LowPerformerAllCates <- PerformerRankAllCates %>%
+  filter(SkuNmv != 0) %>%
+  arrange(desc(ShrinkageRate))
+
+ClassCWithNmvCount <- nrow(PerformerRankAllCates %>%
+  filter(abcclass == "C") %>%
+  filter(SkuNmv != 0))
+```
+
+There are `r ClassCWithNmvCount` products that is in the lower performing SKU group of this period.
+
+The next list shows the Top 10 SKU with the highest Shrinkage Rate. 
+
+*$Shrinkage Rate = Shrinkage Quantity/SellingQuantity$
+
+Shrinkage Rate measures the gap between stock discarded versus stock sold; The higher the rate, the more concerning as the business is losing cash.*
+
+```{r}
+FormatSummaryTable(LowPerformerAllCates %>% 
+                     select(Sku, ProductName, 
+                            NmvQty, SkuNmv, NmvContribution, 
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+```
+
+### Non-performing SKUs
+```{r}
+NonPerformerAllCates <- PerformerRankAllCates %>%
+  filter(SkuNmv == 0) %>%
+  arrange(desc(ShrinkageValue))
+ClassCNoNmvCount <- nrow(NonPerformerAllCates)
+NonPerformingPercentage <- paste0(round(100*ClassCNoNmvCount/TotalSkuCatePeriodCount,1),"%")
+```
+
+There are `r ClassCNoNmvCount` products within this category that generate zero NMV in this period.
+
+That's **`r NonPerformingPercentage`** of total category SKUs.
+
+Top 10 SKUs with no NMV contribution and highest shrinkage values.
+
+```{r}
+FormatSummaryTable(NonPerformerAllCates %>% 
+                     select(Sku, ProductName, 
+                            NmvQty, SkuNmv, NmvContribution, 
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+
+```
+
+## Selection Health
+
+```{r}
+ACount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'A',])
+BCount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'B',])
+CCount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'C',])
+  
+PerformerRankAllCates %>%
+  arrange(desc(SkuNmv)) %>%
+  hchart(
+    type = "column",
+    hcaes(
+      x = ProductName,
+      y = SkuNmv,
+      group = abcclass),
+    showInLegend = TRUE) %>%
+  hc_add_series(name = "Accumulated Contribution", data = PerformerRankAllCates$accpercentage, 
+                type = "line",
+                yAxis = 1,
+                showInLegends = TRUE,
+                color = "#323232") %>%
+  hc_xAxis(categories = PerformerRankAllCates$ProductName,
+             title = "Product Name") %>%
+  hc_yAxis_multiples(list(title = "SKU NMV", 
+                          lineWidth = 3, max = 1.01*max(PerformerRankAllCates$SkuNmv), min = 0),
+                     list(title = "Accumulated Contribution", 
+                          showLastLabel = FALSE, opposite = TRUE, max = 100, min = 0)) %>%
+  hc_xAxis(plotBands = list(list(from = -0.5, to = ACount - 0.5, color = "rgba(128, 128, 128, 0.5)",
+           label = list(text = paste0("A class <br>", ACount, "Products"))),
+      list(from = ACount - 0.5, to = ACount + BCount - 0.5, color = "rgba(128, 128, 128, 0.3)",
+           label = list(text = paste0("B class <br>",  BCount, " Products"))),
+      list(from = ACount + BCount - 0.5, to = ACount + BCount + CCount, color = "rgba(128, 128, 128, 0.1)",
+           label = list(text = paste0("C class <br>",  CCount, " Products"))))) %>%
+  hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+  hc_title(text = "Selection Health - ABC Analysis") %>%
+  hc_chart(zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_colors(c( "#CB333B",  "#0074BC", "#FFCC32", "#7A121C", "#F37032", "#193661",
+               "#EFC1C4",  "#66ABD6", "#FFE084", "#AF7076", "#F7A984", "#7586A0",
+               "#DF8489",  "#004570", "#997A1E", "#490A10", "#91431E", "#0F203A" ))
+  
+```

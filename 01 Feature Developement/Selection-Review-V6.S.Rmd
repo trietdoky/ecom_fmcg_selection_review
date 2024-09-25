@@ -1,0 +1,891 @@
+---
+title: "Selection Review - Overview"
+author: "Triet Do"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  cache = FALSE,
+  echo = FALSE)
+
+options(encoding = 'UTF-8')
+
+# Standalone Report - Disable when execute file
+# source("ini.R")
+# Today <- Sys.Date() - days(1)
+# source("get_data.R")
+# ReviewRegion <- "SOUTH"
+# ReviewCateReport <- c("FRESH")
+# FreshCategory <- CleanSelection %>%
+#   select(Cate2Id, Cate2, TikingonCateReport) %>%
+#   distinct(Cate2Id, .keep_all = TRUE) %>%
+#   filter(TikingonCateReport == 'FRESH')
+# 
+# FmcgCategory <- CleanSelection %>%
+#   select(Cate2Id, Cate2, TikingonCateReport) %>%
+#   distinct(Cate2Id, .keep_all = TRUE) %>%
+#   filter(TikingonCateReport %in% c('FMCG', 'NON-FOOD'))
+
+#ReviewCategory <- c("Thịt, Trứng", "Cá, thuỷ hải sản", "Rau củ quả", "Trái cây", "Thực phẩm Việt", "Thực Phẩm Chế Biến Sẵn", "Đông lạnh, mát", "Thực phẩm chay")
+# ReviewCategory <- c("Sữa, bơ, phô mai", "Dầu ăn, gia vị", "Bia, đồ uống", "Bánh kẹo, giỏ quà", "Đồ hộp, đóng gói", "Gạo, mì, nông sản", "Dành cho trẻ em", "Thức ăn, đồ thú cưng", "Chăm sóc cá nhân", "Chăm sóc nhà cửa", "Gia dụng, tiện ích")
+```
+# GLOSSARY
+
+## SKU Classification
+**SKU A**: SKUs accumlating up to 80% of analyzing period's NMV
+
+**SKU B**: SKUs accumlating up to 95% of analyzing period's NMV
+
+**SKU C**: SKUs accumlating up to 100% of analyzing period's NMV
+
+**SKU D**: SKU contributing no sales in the analyzing period's NMV
+
+## Active SKU
+**Active SKUs** wihin a period is any SKU which:
+- Has available stock
+- Generates sales
+- Has shrinkage.
+
+# OVERVIEW FOR TOTAL NGON
+
+## Margins
+
+Front Margin will be calculated based on the following formular:
+
+$$\begin{eqnarray}
+FrontMargin &=& \frac{ProductSellingValue - ProductBuyingValue}{ProductSellingValue} \\\\ &=& \frac{\sum{SellingPrice*Qty} - \sum{COGS*Qty}}{\sum{SellingPrice*Qty}}
+\end{eqnarray}$$
+
+### Month To Date - Margin - Total Ngon Sub-category
+
+```{r}
+ReviewPeriod <- "MidTerm"
+
+StartDate <- as.Date(ISOdate(year(Today), month(Today), 1))
+EndDate <- as.Date(Today  - days(1))
+source("get_period_data.R")
+```
+
+Margins are calculated based on sales and inventory data from `r StartDate` to `r EndDate`
+
+```{r}
+SkuMargin <- TotalSummary %>%
+  # filter(CustomerGroupRegion == ReviewRegion,
+  #        TikingonCateReport %in% ReviewCateReport) %>%
+  mutate(SellingValue = SkuValue,
+         BuyingValue = Cogs*NmvQty) %>%
+  mutate_if(is.numeric, na.fill, 0) %>%
+  # CASH HOLDING COST
+  group_by(Sku, ProductName, Cate2Id, Cate2, TikingonCateReport) %>%
+  summarize(SellingValue = sum(SellingValue),
+            BuyingValue = sum(BuyingValue),
+            ShrinkageValue = sum(ShrinkageValue),
+            SkuNmv = sum(SkuNmv),
+            CashHoldingCost = mean(QtyInventorySalable*Cogs*WACC)) %>%
+  ungroup()
+
+TotalMargin <- SkuMargin %>%
+  summarise(SellingValue = sum(SellingValue),
+            BuyingValue = sum(BuyingValue),
+            CashHoldingCost = sum(CashHoldingCost),
+            ShrinkageValue = sum(ShrinkageValue),
+            FrontMargin = (SellingValue - BuyingValue)/SellingValue,
+            RefinedFrontMargin = (SellingValue - BuyingValue - CashHoldingCost - ShrinkageValue)/SellingValue,
+            Nmv = sum(SkuNmv)) %>%
+  mutate(TikingonCateReport = 'Total Ngon') %>%
+  select(TikingonCateReport, Nmv, FrontMargin, RefinedFrontMargin)
+
+NgonSubcateMargin <- SkuMargin %>%
+  group_by(TikingonCateReport) %>%
+  summarise(SellingValue = sum(SellingValue),
+            BuyingValue = sum(BuyingValue),
+            CashHoldingCost = sum(CashHoldingCost),
+            ShrinkageValue = sum(ShrinkageValue),
+            FrontMargin = (SellingValue - BuyingValue)/SellingValue,
+            RefinedFrontMargin = (SellingValue - BuyingValue - CashHoldingCost - ShrinkageValue)/SellingValue,
+            Nmv = sum(SkuNmv)) %>%
+  ungroup() %>%
+  select(TikingonCateReport, Nmv, FrontMargin, RefinedFrontMargin) %>%
+  bind_rows(TotalMargin)
+
+FormatSummaryTable(NgonSubcateMargin, percentageColNames = c('FrontMargin', 'RefinedFrontMargin'))
+```
+
+### Last Month - Margin - Total Ngon Sub-category
+
+```{r}
+ReviewPeriod <- "MidTerm"
+
+StartDate <- as.Date(ISOdate(year(Today), month(Today), 1) - months(1))
+EndDate <- as.Date(ISOdate(year(Today), month(Today), 1)  - days(1))
+source("get_period_data.R")
+```
+
+Margins are calculated based on sales and inventory data from `r StartDate` to `r EndDate`
+
+```{r}
+SkuMargin <- TotalSummary %>%
+  # filter(CustomerGroupRegion == ReviewRegion,
+  #        TikingonCateReport %in% ReviewCateReport) %>%
+  mutate(SellingValue = SkuValue,
+         BuyingValue = Cogs*NmvQty) %>%
+  mutate_if(is.numeric, na.fill, 0) %>%
+  # CASH HOLDING COST
+  group_by(Sku, ProductName, Cate2Id, Cate2, TikingonCateReport) %>%
+  summarize(SellingValue = sum(SellingValue),
+            BuyingValue = sum(BuyingValue),
+            ShrinkageValue = sum(ShrinkageValue),
+            SkuNmv = sum(SkuNmv),
+            CashHoldingCost = mean(QtyInventorySalable*Cogs*WACC)) %>%
+  ungroup()
+
+TotalMargin <- SkuMargin %>%
+  summarise(SellingValue = sum(SellingValue),
+            BuyingValue = sum(BuyingValue),
+            CashHoldingCost = sum(CashHoldingCost),
+            ShrinkageValue = sum(ShrinkageValue),
+            FrontMargin = (SellingValue - BuyingValue)/SellingValue,
+            RefinedFrontMargin = (SellingValue - BuyingValue - CashHoldingCost - ShrinkageValue)/SellingValue,
+            Nmv = sum(SkuNmv)) %>%
+  mutate(TikingonCateReport = 'Total Ngon') %>%
+  select(TikingonCateReport, Nmv, FrontMargin, RefinedFrontMargin)
+
+NgonSubcateMargin <- SkuMargin %>%
+  group_by(TikingonCateReport) %>%
+  summarise(SellingValue = sum(SellingValue),
+            BuyingValue = sum(BuyingValue),
+            CashHoldingCost = sum(CashHoldingCost),
+            ShrinkageValue = sum(ShrinkageValue),
+            FrontMargin = (SellingValue - BuyingValue)/SellingValue,
+            RefinedFrontMargin = (SellingValue - BuyingValue - CashHoldingCost - ShrinkageValue)/SellingValue,
+            Nmv = sum(SkuNmv)) %>%
+  ungroup() %>%
+  select(TikingonCateReport, Nmv, FrontMargin, RefinedFrontMargin) %>%
+  bind_rows(TotalMargin)
+
+FormatSummaryTable(NgonSubcateMargin, percentageColNames = c('FrontMargin', 'RefinedFrontMargin'))
+```
+
+## Out-of-Stock Analysis
+
+```{r}
+
+CleanSelection <- SelectionNgon %>%
+  clean_names("upper_camel")
+
+CleanSalesOrder <- RawSalesOrder %>%
+  filter(as.Date(order_date) >= StartDate,
+         as.Date(order_date) <= EndDate) %>%
+  filter(warehouse_name !='DN') %>%
+  clean_names("upper_camel")
+
+CleanInv <- NewestCogs %>%
+  filter(as.Date(date_key) >= StartDate,
+         as.Date(date_key) <= EndDate) %>%
+  mutate(warehouse = case_when(
+    warehouse == "SGN" ~ "MFTBI",
+    warehouse == "HN5" ~ "MFLBI",
+    TRUE ~ warehouse
+  )) %>%
+  filter(!(warehouse %in% c("SGN3", "VLN", "HN4"))) %>%
+  filter(warehouse!='DN') %>%
+  clean_names("upper_camel")
+
+DaysActive <- nrow(CleanInv %>% distinct(DateKey))
+
+ActiveSkuList <- CleanSalesOrder %>%
+  distinct(Sku)
+```
+
+```{r}
+
+InvSummary <- CleanInv %>%
+  filter(Sku %in% ActiveSkuList$Sku,
+         QtyInventorySalable > 0) %>%
+  group_by(Sku, Warehouse) %>%
+  summarise(AvgStock = mean(QtyInventorySalable),
+            StockAvailableDays = n()) %>%
+  ungroup() %>%
+  mutate(DaysActive = DaysActive,
+         OosDays = DaysActive - StockAvailableDays)
+
+SalesSummary <- CleanSalesOrder %>%
+  group_by(Sku, WarehouseName) %>%
+  summarise(TotalNmv = sum(Nmv),
+            TotalNmvQty = sum(ProductQty)) %>%
+  ungroup()
+
+OosAnalysis <- InvSummary %>%
+  left_join(SalesSummary, by = c("Sku", "Warehouse" = "WarehouseName")) %>%
+  mutate_if(is.numeric, na.fill, 0) %>%
+  mutate(AvgDailySales = TotalNmv/StockAvailableDays) %>%
+  left_join(CleanSelection %>% select(Sku, ProductName, Cate2, Cate2Id, TikingonCateReport, IsListed),
+            by = "Sku") %>%
+  filter(Warehouse!='DN')
+```
+### Methodology
+Average Daily Sales: $$AverageDailySales = \frac{TotalNMV}{ActiveDays}$$
+
+Out of Stock Rate: $$OOS Rate = \frac{\sum(AverageDailySales*OOSDays)}{\sum(AverageDailySales*ReviewPeriodDays)}$$
+
+* OOS Rate describes the NMV opportunity lost due to OOS dates within review period
+
+### OOS Rate by Ngon Sub Cate
+
+```{r}
+OosBySubCate <- OosAnalysis %>%
+  group_by(TikingonCateReport) %>%
+  summarize(OosRate = 100*sum(AvgDailySales*OosDays)/sum(AvgDailySales*DaysActive)) %>%
+  ungroup() %>%
+  filter(!is.nan(OosRate))
+
+OosBySubCateDrilldownWarehouse <- OosAnalysis %>%
+  group_by(TikingonCateReport, Warehouse) %>%
+  summarize(OosRate = 100*sum(AvgDailySales*OosDays)/sum(AvgDailySales*DaysActive)) %>%
+  ungroup() %>%
+  filter(!is.nan(OosRate)) %>%
+  group_nest(TikingonCateReport) %>%
+  mutate(
+    id = TikingonCateReport,
+    type = "column",
+    name = "OOS Rate",
+    # in the drilldown we'll give the mapping via creating the columns
+    data = map(data, mutate, name = Warehouse,  y = OosRate),
+    data = map(data, list_parse),
+    keys = list(keys)
+  )
+
+OosBySubCate %>%
+  arrange(TikingonCateReport,desc(OosRate)) %>%
+  hchart(
+    type = "column",
+    hcaes(
+      x = TikingonCateReport,
+      y = OosRate,
+      group = TikingonCateReport,
+      drilldown = TikingonCateReport),
+    showInLegend = TRUE) %>%
+  hc_drilldown(allowPointDrilldown = TRUE,
+    series = list_parse(OosBySubCateDrilldownWarehouse)) %>%
+  hc_chart(backgroundColor = '#FCFCFC', zoomType = "xy") %>%
+  hc_tooltip(pointFormat = "<b>{point.name}</b>:<br>
+                            {point.OosRate:.2f}%<br>") %>%
+  hc_xAxis(title = "Category") %>%
+  hc_yAxis(title = "Out of Stock Rate (%)", lineWidth = 3, max = 100, min = 0,
+           labels = list(format = "{value}%")) %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_title(text = paste0("Out of Stock Rate by Sub Category")) %>%
+  hc_subtitle(text = paste0("by Category, from ", StartDate," to ", EndDate))
+
+```
+
+
+# OVERVIEW FOR `r ReviewRegion`
+
+```{r}
+# CATEGORY ANALYSIS
+# SKU COUNT
+LatestSelectionSummary <- CleanSelection %>%
+  filter(IsSalable == TRUE) %>%
+  distinct(Sku, .keep_all = TRUE) %>%
+  group_by(Cate2, TikingonCateReport) %>%
+  summarize(SkuCount = n()) %>%
+  ungroup() %>%
+  filter(TikingonCateReport %in% ReviewCateReport)
+
+TotalSkuCount <- sum(LatestSelectionSummary$SkuCount)
+
+# NMV
+ReviewPeriod <- "MidTerm"
+StartDate <- DatePeriod(ReviewPeriod)
+EndDate <- Sys.Date() - days(1)
+source("get_period_data.R")
+
+# export(TotalSummary, "TotalSummary.xlsx")
+
+NmvByCate1Month <- TotalSummary %>%
+  filter(TikingonCateReport %in% ReviewCateReport,
+         CustomerGroupRegion == ReviewRegion) %>%
+  group_by(Cate2, TikingonCateReport) %>%
+  summarize(CatNmv = sum(SkuNmv)) %>%
+  ungroup()
+
+# SKU PER WAREHOUSE
+CurrentStockStatus <- InvData %>%
+  filter(DateKey == Today) %>%
+  left_join(CleanSelection %>% select(Sku, TikingonCateReport), by = "Sku") %>%
+  filter(TikingonCateReport %in% ReviewCateReport) %>%
+  filter(QtyInventorySalable >0) %>%
+  group_by(WarehouseName) %>%
+  summarize(SkuPerWarehouse = n_distinct(Sku)) %>%
+  ungroup() %>%
+  mutate(WarehouseRegion = case_when(
+    WarehouseName %in% ActiveCentralWarehouse ~ 'CENTRAL',
+    WarehouseName %in% ActiveNorthWarehouse ~ 'NORTH',
+    WarehouseName %in% ActiveSouthWarehouse ~ 'SOUTH',
+    TRUE ~ 'TRANSIT'))
+
+```
+
+
+As of `r Today`, sub-category **`r ReviewCateReport`** has **`r TotalSkuCount`** salable products.
+
+The products within each category are as followed:
+
+```{r}
+h1 <- CreatePieChart(LatestSelectionSummary, Cate2, SkuCount) %>%
+  hc_plotOptions(pie = list(dataLabels = list(enable = TRUE, 
+                                              format = '<b>{point.name}</b> <br>{point.percentage:.1f} %'))) %>%
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_add_theme(SetThemeFontForHighcharter()) %>%
+  hc_tooltip(useHTLM = TRUE,
+             crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             pointFormat = "Percentage: <b>{point.percentage:.1f}%</b> <br>Count: <b>{point.y}SKU</b>",
+             valueDecimals = 0) %>%
+  hc_title(text = paste0("Number of SKU - ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by Category, from ", StartDate," to ", EndDate))
+
+h2 <- CreatePieChart(NmvByCate1Month, Cate2, CatNmv) %>%
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_add_theme(SetThemeFontForHighcharter()) %>%
+  hc_tooltip(useHTLM = TRUE,
+             crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             pointFormat = "Percentage: <b>{point.percentage:.1f}%</b> <br>Value: <b>{point.y}VND</b>",
+             valueDecimals = 0) %>%
+  hc_title(text = paste0("NMV Contribution - ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by Category, from ", StartDate," to ", EndDate))
+
+hw_grid(h1, h2)
+
+```
+For `r ReviewCateReport`, the number of SKU per warehouse is as followed:
+
+```{r}
+hchart(CurrentStockStatus, type = 'column', hcaes(x = WarehouseName, y = SkuPerWarehouse, group = WarehouseRegion), 
+       showInLegends = TRUE) %>%
+  hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+  hc_chart(backgroundColor = '#FCFCFC', zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_title(text = paste0("SKU Count - ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by Warehouse, as of ", EndDate))
+```
+
+
+# LAST 30 DAYS REVIEW
+
+The SKUs being reviewed in this period are (1) SKUs having available stock, (2) SKUs generating sales and (3) SKUs having shrinkage.
+
+```{r}
+ReviewPeriod <- "MidTerm"
+
+StartDate <- DatePeriod(ReviewPeriod)
+EndDate <- Sys.Date() - days(1)
+source("get_period_data.R")
+```
+
+Review period: **`r ReviewPeriod`**
+
+Review region: **`r ReviewRegion`**
+
+Review Cate Report: **`r ReviewCateReport`**
+
+From: **`r StartDate`**
+
+To: **`r EndDate`**
+
+As of `r Today`, sub-category **`r ReviewCateReport`** has **`r TotalSkuCount`** salable products.
+
+```{r}
+
+PerformerRankAllCates <- TotalSummary %>%
+  filter(CustomerGroupRegion == ReviewRegion,
+         TikingonCateReport %in% ReviewCateReport) %>%
+  group_by(Sku, ProductName, Cate2, Cate3) %>%
+  summarize(SkuNmv = sum(SkuNmv),
+            NmvQty = sum(NmvQty),
+            AvgStock = ceiling(mean(QtyInventorySalable)),
+            TotalCustomer = sum(TotalCustomer),
+            ReturnCustomer = max(ReturnCustomer), # returning customer within 6 months
+            ShrinkageQty = sum(ShrinkageQty),
+            ShrinkageValue = sum(ShrinkageValue),
+            AvgSalesPeriod = SkuNmv/(1+as.numeric(difftime(EndDate,StartDate, units = "day"))),
+            AvgRating = max(AvgRating),
+            TotalApprovedReview = max(TotalApprovedReview),
+            LtThreeStarsCount = min(LtThreeStarsCount),
+            ShrinkageRate = ShrinkageQty/NmvQty,
+            DoC = max(DoC)) %>%
+  ungroup() %>%
+  mutate(NmvContribution = SkuNmv/sum(SkuNmv)) %>%
+  ABCClassify(SkuNmv, abcRange = c(80, 95)) %>%
+  mutate(abcclass = ifelse(NmvContribution == 0, 'D', abcclass)) %>%
+  arrange(accpercentage)
+
+TotalSkuCatePeriodCount <- nrow(PerformerRankAllCates)
+
+```
+
+Total SKU Active in this period: **`r TotalSkuCatePeriodCount`**
+
+```{r}
+OverviewData <- PerformerRankAllCates %>%
+  mutate(abcclass = paste0("SKU Class ", abcclass)) %>%
+  group_by(abcclass) %>%
+  summarize(SkuCount = n())
+
+h1 <- CreatePieChart(OverviewData,
+               colX = abcclass,
+               colY = SkuCount) %>% 
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_add_theme(SetThemeFontForHighcharter()) %>%
+  hc_tooltip(useHTLM = TRUE,
+             crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             pointFormat = "Percentage: <b>{point.percentage:.1f}%</b> <br>Count: <b>{point.y}SKU</b>",
+             valueDecimals = 0) %>%
+  hc_title(text = paste0("ABC SKU Class Contribution - ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by SKU Class, from ", StartDate," to ", EndDate))
+
+h2 <- PerformerRankAllCates %>%
+  group_by(Cate2) %>%
+  summarise(Nmv = sum(SkuNmv)) %>%
+  hchart(type = 'treemap', hcaes(x = Cate2, value = Nmv, color = Nmv)) %>%
+  hc_tooltip(crosshairs = TRUE, shared = TRUE,
+             headerFormat = str_c("", " ", '</b>{point.key}</b><br/>'),
+             valuePrefix = str_c("</b>", "", " "),
+             valueSuffix = str_c(" ", "VND", "</b>"),
+             valueDecimals = 0) %>%
+  hc_title(text = paste0("NMV Contribution - ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by Category, from ", StartDate," to ", EndDate))
+
+hw_grid(h1, h2)
+```
+
+```{r}
+ClassificationSummary <- PerformerRankAllCates %>%
+  group_by(Cate2, abcclass) %>%
+  summarise(ClassCount = n_distinct(Sku)) %>%
+  ungroup() %>%
+  spread(key = "abcclass", value = "ClassCount") %>%
+  mutate_if(is.numeric, na.fill, 0) %>%
+  mutate(TotalSkuCount = A + B + C + D,
+         NonPerformingPercent = D/TotalSkuCount) %>%
+  select(Cate2, TotalSkuCount, A, B, C, D, NonPerformingPercent)
+
+FormatDataTable(ClassificationSummary, decimalDigits = 0, percentageColNames = "NonPerformingPercent")
+```
+
+
+## Top Performing SKUs
+
+```{r}
+TopPerformerAllCates <- PerformerRankAllCates %>%
+  filter(abcclass == "A")
+
+ClassACount <- nrow(TopPerformerAllCates)
+
+```
+
+There are `r ClassACount` products contribute to 80% of this period's NMV.
+
+Top 10 SKU with the best NMV contributions are as followed:
+
+```{r}
+
+FormatSummaryTable(TopPerformerAllCates %>% 
+                     select(Sku, ProductName, Cate2, Cate3,
+                            NmvQty, SkuNmv, NmvContribution, DoC,
+                            ShrinkageQty, ShrinkageValue,
+                            TotalCustomer, ReturnCustomer,
+                            TotalApprovedReview, AvgRating, LtThreeStarsCount) %>%
+                     head(10), 
+                   decimalDigits = 1,
+                   percentageColNames = c("NmvContribution"))
+
+
+```
+
+## Selection Health
+
+```{r}
+ACount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'A',])
+BCount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'B',])
+CCount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'C',])
+DCount <- nrow(PerformerRankAllCates[PerformerRankAllCates$abcclass == 'D',])
+  
+PerformerRankAllCates %>%
+  arrange(desc(SkuNmv)) %>%
+  hchart(
+    type = "column",
+    hcaes(
+      x = ProductName,
+      y = SkuNmv,
+      group = abcclass),
+    showInLegend = TRUE) %>%
+  hc_add_series(name = "Accumulated Contribution", data = PerformerRankAllCates$accpercentage, 
+                type = "line",
+                yAxis = 1,
+                showInLegends = TRUE,
+                color = "#323232") %>%
+  hc_xAxis(categories = PerformerRankAllCates$ProductName,
+             title = "Product Name") %>%
+  hc_yAxis_multiples(list(title = "SKU NMV", 
+                          lineWidth = 3, max = 1.01*max(PerformerRankAllCates$SkuNmv), min = 0),
+                     list(title = "Accumulated Contribution", 
+                          showLastLabel = FALSE, opposite = TRUE, max = 100, min = 0)) %>%
+  hc_xAxis(plotBands = list(list(from = -0.5, to = ACount - 0.5, color = "rgba(128, 128, 128, 0.5)",
+           label = list(text = paste0("A class <br>", ACount, "Products"))),
+      list(from = ACount - 0.5, to = ACount + BCount - 0.5, color = "rgba(128, 128, 128, 0.3)",
+           label = list(text = paste0("B class <br>",  BCount, " Products"))),
+      list(from = ACount + BCount - 0.5, to = ACount + BCount + CCount, color = "rgba(128, 128, 128, 0.1)",
+           label = list(text = paste0("C class <br>",  CCount, " Products"))),
+      list(from = ACount + BCount + CCount - 0.5, to = ACount + BCount + CCount + DCount, color = "rgba(255, 16, 49, 0.3)",
+           label = list(text = paste0("D class <br>",  DCount, " Products"))))) %>%
+  hc_plotOptions(series = list(marker = list(enabled = FALSE))) %>%
+  hc_chart(backgroundColor = '#FCFCFC', zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_colors(c( "#CB333B",  "#0074BC", "#FFCC32", "#7A121C", "#F37032", "#193661",
+               "#EFC1C4",  "#66ABD6", "#FFE084", "#AF7076", "#F7A984", "#7586A0",
+               "#DF8489",  "#004570", "#997A1E", "#490A10", "#91431E", "#0F203A" )) %>%
+  hc_title(text = paste0("Selection Health - ABC Analysis ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by SKU Class, from ", StartDate," to ", EndDate))
+```
+
+### Segmentation by Positive RFM and 2% NMV Contribution
+
+
+```{r}
+BcgData <- TotalSummary %>%
+  filter(CustomerGroupRegion == ReviewRegion,
+         TikingonCateReport %in% ReviewCateReport) %>%
+  mutate(SellingValue = SkuValue,
+         BuyingValue = Cogs*NmvQty) %>%
+  mutate_if(is.numeric, na.fill, 0) %>%
+  # CASH HOLDING COST
+  group_by(Sku, ProductName, Cate2Id, Cate2) %>%
+  summarize(SellingValue = sum(SellingValue),
+            BuyingValue = sum(BuyingValue),
+            ShrinkageValue = sum(ShrinkageValue),
+            SkuNmv = sum(SkuNmv),
+            CashHoldingCost = mean(QtyInventorySalable*Cogs*WACC)) %>%
+  ungroup() %>%
+  group_by(Cate2, Cate2Id) %>%
+  mutate(NmvContribution = SkuNmv/sum(SkuNmv)) %>%
+  ungroup() %>%
+  mutate(NmvContributionAllCate = SkuNmv/sum(SkuNmv),
+         RefinedFrontMargin = (SellingValue - BuyingValue - CashHoldingCost - ShrinkageValue)/SellingValue,
+         RefinedFrontMarginPercent = 100*RefinedFrontMargin,
+         FrontMargin = (SellingValue - BuyingValue)/SellingValue,
+         FrontMarginPercent = 100*FrontMargin)
+
+BcgDataGraph <- BcgData %>%
+  filter(!is.na(RefinedFrontMargin),
+         !is.infinite(RefinedFrontMargin))
+
+MedianContribution <- median(BcgDataGraph$NmvContribution)
+MedianRfm <- median(BcgDataGraph$RefinedFrontMargin)
+MedianFm <- median(BcgDataGraph$FrontMargin)
+
+XLine <- 0.02
+YLine <- 0
+
+h1 <- BcgDataGraph %>%
+  group_by(Cate2Id, Cate2) %>%
+  summarize(SellingValue = sum(SellingValue),
+            BuyingValue = sum(BuyingValue),
+            ShrinkageValue = sum(ShrinkageValue),
+            NmvContributionAllCate = sum(NmvContributionAllCate),
+            CashHoldingCost = sum(CashHoldingCost)) %>%
+  ungroup() %>%
+  mutate(RefinedFrontMargin = (SellingValue - BuyingValue - CashHoldingCost - ShrinkageValue)/SellingValue,
+         RefinedFrontMarginPercent = 100*RefinedFrontMargin)
+h1 <- h1 %>%
+  hchart(type = "scatter",
+         maxSize = 100,
+         hcaes(x = NmvContributionAllCate,  
+               y = RefinedFrontMargin, 
+               # size = SellingValue,
+               group = Cate2),
+               tooltip = list(pointFormat = "<b>{point.Cate2}</b> <br>
+               Refined Front Margin (%): <b>{point.RefinedFrontMarginPercent:,.1f}%</b> <br>
+               Selling Value (VND): <b>{point.SellingValue:,.0f}</b> <br>
+               Buying Value (VND): <b>{point.BuyingValue:,.0f}</b> <br>
+               Cash Holding Cost (VND): <b>{point.CashHoldingCost:,.0f}</b> <br>
+               Shrinkage Value (VND): <b>{point.ShrinkageValue:,.0f}</b>" )) %>%
+  hc_xAxis(title = list(text = "NMV Contribution",
+                        startOnTick = FALSE),
+           min = -max(abs(h1$NmvContributionAllCate), na.rm = TRUE)*1.1,
+           max = max(abs(h1$NmvContributionAllCate), na.rm = TRUE)*1.1) %>%
+  hc_yAxis(title = list(text = "Refined Front Margin",
+                        startOnTick = FALSE),
+           min = -max(abs(h1$RefinedFrontMargin), na.rm = TRUE)*1.1,
+           max = max(abs(h1$RefinedFrontMargin), na.rm = TRUE)*1.1,
+           plotLines = list(list(color = 'blue',
+                            value = YLine,
+                            width = 2))) %>%
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_chart(backgroundColor = '#FCFCFC', zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_title(text = paste0("Selection Health - Refined Front Margin Analysis - ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by Category, from ", StartDate," to ", EndDate))
+
+h2 <- BcgDataGraph %>%
+  group_by(Cate2Id, Cate2) %>%
+  summarize(SellingValue = sum(SellingValue),
+            BuyingValue = sum(BuyingValue),
+            ShrinkageValue = sum(ShrinkageValue),
+            NmvContributionAllCate = sum(NmvContributionAllCate),
+            CashHoldingCost = sum(CashHoldingCost)) %>%
+  ungroup() %>%
+  mutate(FrontMargin = (SellingValue - BuyingValue)/SellingValue,
+         FrontMarginPercent = 100*FrontMargin)
+h2 <- h2 %>%
+  hchart(type = "scatter",
+         maxSize = 100,
+         hcaes(x = NmvContributionAllCate,  
+               y = FrontMargin, 
+               # size = SellingValue,
+               group = Cate2),
+               tooltip = list(pointFormat = "<b>{point.Cate2}</b> <br>
+               Front Margin (%): <b>{point.FrontMarginPercent:,.1f}%</b> <br>
+               Selling Value (VND): <b>{point.SellingValue:,.0f}</b> <br>
+               Buying Value (VND): <b>{point.BuyingValue:,.0f}</b> <br>
+               Cash Holding Cost (VND): <b>{point.CashHoldingCost:,.0f}</b> <br>
+               Shrinkage Value (VND): <b>{point.ShrinkageValue:,.0f}</b>" )) %>%
+  hc_xAxis(title = list(text = "NMV Contribution",
+                        startOnTick = FALSE),
+           min = -max(abs(h2$NmvContributionAllCate), na.rm = TRUE)*1.1,
+           max = max(abs(h2$NmvContributionAllCate), na.rm = TRUE)*1.1) %>%
+  hc_yAxis(title = list(text = "Front Margin",
+                        startOnTick = FALSE),
+           min = -max(abs(h2$FrontMargin), na.rm = TRUE)*1.1,
+           max = max(abs(h2$FrontMargin), na.rm = TRUE)*1.1,
+           plotLines = list(list(color = 'blue',
+                            value = YLine,
+                            width = 2))) %>%
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_chart(backgroundColor = '#FCFCFC', zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_title(text = paste0("Selection Health - Front Margin Analysis - ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by Category, from ", StartDate," to ", EndDate))
+
+hw_grid(h1, h2)
+
+h3 <- BcgDataGraph
+  #filter(Cate2Id %in% c(54290, 54302)) %>%
+h3 <- h3 %>%  
+  hchart(type = "scatter",
+                           maxSize = 70,
+                           hcaes(x = NmvContribution,  
+                                 y = RefinedFrontMargin, 
+                                 #size = SellingValue,
+                                 group = Cate2),
+                                 tooltip = list(pointFormat = "<b>{point.ProductName}</b> <br>
+                                 Refined Front Margin (%): <b>{point.RefinedFrontMarginPercent:,.1f}%</b> <br>
+                                 Product Value (VND): <b>{point.SellingValue:,.0f}</b> <br>
+                                 COGS (VND): <b>{point.BuyingValue:,.0f}</b> <br>
+                                 Cash Holding Cost (VND): <b>{point.CashHoldingCost:,.0f}</b> <br>
+                                 Shrinkage Value (VND): <b>{point.ShrinkageValue:,.0f}</b>" )) %>%
+  hc_xAxis(title = list(text = "NMV Contribution in Category"),
+           min = -max(abs(h3$NmvContribution), na.rm = TRUE)*1.1,
+           max = max(abs(h3$NmvContribution), na.rm = TRUE)*1.1,
+           plotLines = list(list(color = 'red',
+                                 value = XLine,
+                            # value = MedianContribution,
+                            width = 2))) %>%
+  hc_yAxis(title = list(text = "Refined Front Margin"),
+           min = -max(abs(h3$RefinedFrontMargin), na.rm = TRUE)*1.1,
+           max = max(abs(h3$RefinedFrontMargin), na.rm = TRUE)*1.1,
+           plotLines = list(list(color = 'blue',
+                            # value = MedianRfm,
+                            value = YLine,
+                            width = 2))) %>%
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_chart(backgroundColor = '#FCFCFC', zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_title(text = paste0("Selection Health - Refined Front Margin Analysis - ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by SKU and Category, from ", StartDate," to ", EndDate))
+
+h4 <- BcgDataGraph
+  #filter(Cate2Id %in% c(54290, 54302)) %>%
+h4 <- h4 %>%
+  hchart(type = "scatter",
+                           maxSize = 70,
+                           hcaes(x = NmvContribution,  
+                                 y = FrontMargin, 
+                                 #size = SellingValue,
+                                 group = Cate2),
+                                 tooltip = list(pointFormat = "<b>{point.ProductName}</b> <br>
+                                 Front Margin (%): <b>{point.FrontMarginPercent:,.1f}%</b> <br>
+                                 Product Value (VND): <b>{point.SellingValue:,.0f}</b> <br>
+                                 COGS (VND): <b>{point.BuyingValue:,.0f}</b> <br>
+                                 Cash Holding Cost (VND): <b>{point.CashHoldingCost:,.0f}</b> <br>
+                                 Shrinkage Value (VND): <b>{point.ShrinkageValue:,.0f}</b>" )) %>%
+  hc_xAxis(title = list(text = "NMV Contribution in Category"),
+           min = -max(abs(h4$NmvContribution), na.rm = TRUE)*1.1,
+           max = max(abs(h4$NmvContribution), na.rm = TRUE)*1.1,
+           plotLines = list(list(color = 'red',
+                            # value = MedianContribution,
+                            value = XLine,
+                            width = 2))) %>%
+  hc_yAxis(title = list(text = "Front Margin"),
+           min = -max(abs(h4$FrontMargin), na.rm = TRUE)*1.1,
+           max = max(abs(h4$FrontMargin), na.rm = TRUE)*1.1,
+                      plotLines = list(list(color = 'blue',
+                            # value = MedianFm,
+                            value = YLine,
+                            width = 2))) %>%
+  hc_colors(CreateTikiNgonColor()) %>% 
+  hc_chart(backgroundColor = '#FCFCFC', zoomType = "xy") %>%
+  hc_exporting(enabled = TRUE) %>%
+  hc_title(text = paste0("Selection Health - Front Margin Analysis - ", ReviewRegion, " ", ReviewCateReport[[1]])) %>%
+  hc_subtitle(text = paste("by SKU and Category, from ", StartDate," to ", EndDate))
+
+hw_grid(h3, h4)
+
+# Mean NMV Contribution: `r MedianContribution`
+# 
+# Mean Refined Margin: `r MedianRfm`
+# 
+# Mean Front Margin: `r MedianFm`
+
+  
+```
+
+
+```{r}
+
+SegmentationSummary_bytype <- BcgData %>%
+  mutate(Types = case_when(
+  (RefinedFrontMargin >= YLine) & (NmvContribution >= XLine) ~ "STAR",
+  (RefinedFrontMargin >= YLine) & (NmvContribution < XLine) ~ "QUESTION MARK",
+  (RefinedFrontMargin < YLine) & (NmvContribution >= XLine) ~ "CASH COW",
+  (RefinedFrontMargin < YLine) & (NmvContribution < XLine) ~ "DOG",
+  TRUE ~ "RECHECK")) %>%
+  group_by(Types) %>%
+  summarise(Count = n(),
+            NmvAbsolute = sum(SkuNmv)) %>%
+  ungroup() %>%
+  mutate(NmvPercent = NmvAbsolute/sum(NmvAbsolute))
+
+FormatSummaryTable(SegmentationSummary_bytype, percentageColNames = c('NmvPercent'))
+
+
+SegmentationSummary_tmp <- BcgData %>%
+  mutate(Types = case_when(
+  (RefinedFrontMargin >= YLine) & (NmvContribution >= XLine) ~ "STAR",
+  (RefinedFrontMargin >= YLine) & (NmvContribution < XLine) ~ "QUESTION MARK",
+  (RefinedFrontMargin < YLine) & (NmvContribution >= XLine) ~ "CASH COW",
+  (RefinedFrontMargin < YLine) & (NmvContribution < XLine) ~ "DOG",
+  TRUE ~ "RECHECK")) %>%
+  group_by(Cate2, Types) %>%
+  summarise(Count = n(),
+            NmvAbsolute = sum(SkuNmv)) %>%
+  ungroup() %>%
+  mutate(tempvalue = paste0(Count, '%%', NmvAbsolute)) %>%
+  select(-Count, -NmvAbsolute) %>%
+  spread(key = "Types", value = "tempvalue", fill = 0) %>%
+  clean_names('upper_camel') %>%
+  select(-contains('Recheck')) %>%
+  separate(col = 'CashCow', into = c('CashCow', 'CashCowNmvAbsolute'), sep = '%%') %>%
+  separate(col = 'Dog', into = c('Dog', 'DogNmvAbsolute'), sep = '%%') %>%
+  separate(col = 'QuestionMark', into = c('QuestionMark', 'QuestionMarkNmvAbsolute'), sep = '%%') %>%
+  separate(col = 'Star', into = c('Star', 'StarNmvAbsolute'), sep = '%%') %>%
+  mutate(across(everything(), na.fill, 0)) %>%
+  mutate(across(!Cate2, as.numeric)) %>%
+  mutate(Total = CashCow + Dog + QuestionMark + Star,
+         CC_percent = CashCow/Total,
+         D_percent = Dog/Total,
+         QM_percent = QuestionMark/Total,
+         S_percent = Star/Total) %>%
+  select(Cate2, Total,
+         Star, StarNmvAbsolute, S_percent,
+         CashCow, CashCowNmvAbsolute, CC_percent,
+         QuestionMark, QuestionMarkNmvAbsolute, QM_percent,
+         Dog, DogNmvAbsolute, D_percent)
+
+FormatSummaryTable(SegmentationSummary_tmp, percentageColNames = c('S_percent', 'CC_percent', 'QM_percent', 'D_percent'))
+
+```
+
+
+## Keywords Analysis
+
+```{r}
+source('keywordanalysis.R')
+
+# GRAPH
+
+# all1 <- wordcloud(words = AllSearchClean$SearchKeyword, freq = AllSearchClean$Count, rot.per=0.35, colors=brewer.pal(8, "Dark2"), max.words = 100)
+# all2 <- wordcloud(words = KeyFreqClean$SearchKeyword, freq = KeyFreqClean$Count, rot.per=0.35, colors=brewer.pal(8, "Dark2"), max.words = 100)
+# 
+# 
+# hub1 <- wordcloud(words = HubSearchClean$SearchKeyword, freq = HubSearchClean$Count, rot.per=0.35, colors=brewer.pal(8, "Dark2"), max.words = 100)
+# hub2 <- wordcloud(words = HubSearchWords$SearchKeyword, freq = HubSearchWords$Count, rot.per=0.35, colors=brewer.pal(8, "Dark2"), max.words = 100)
+
+```
+
+**Top 100 Keywords - Total Tiki/Affiliated Channel**
+Directed from all sources
+
+```{r}
+all2 <- wordcloud(words = KeyFreqClean$SearchKeyword, freq = KeyFreqClean$Count, rot.per=0.35, colors=brewer.pal(8, "Dark2"), max.words = 100)
+```
+
+
+**Top 100 Keywords - Ngon Hub**
+Only from TikiNgon page
+
+```{r}
+hub1 <- wordcloud(words = HubSearchClean$SearchKeyword, freq = HubSearchClean$Count, rot.per=0.35, colors=brewer.pal(8, "Dark2"), max.words = 100)
+```
+
+
+
+```{r}
+# EXPORTING DATA
+
+PerformerRankAllCatesExport <- PerformerRankAllCates
+OosAnalysisExport <- OosAnalysis %>%
+  select(Sku, ProductName, Cate2, TikingonCateReport, Warehouse,
+         DaysActive, StockAvailableDays, OosDays,
+         TotalNmv, TotalNmvQty)
+BcgDataExport <- BcgData %>%
+  mutate(Types = case_when(
+  (RefinedFrontMargin >= YLine) & (NmvContribution >= XLine) ~ "STAR",
+  (RefinedFrontMargin >= YLine) & (NmvContribution < XLine) ~ "QUESTION MARK",
+  (RefinedFrontMargin < YLine) & (NmvContribution >= XLine) ~ "CASH COW",
+  (RefinedFrontMargin < YLine) & (NmvContribution < XLine) ~ "DOG",
+  TRUE ~ "RECHECK"
+  ))
+NmvSalesTimeSeriesExport <- TotalSummary %>%
+  group_by(OrderDate, Sku, ProductName, Cate2, Cate3, TikingonCateReport) %>%
+  summarise(SkuNmv = sum(SkuNmv)) %>%
+  ungroup() %>%
+  spread(key = "OrderDate", value = "SkuNmv", fill = 0)
+QtySalesTimeSeriesExport <- TotalSummary %>%
+  group_by(OrderDate, Sku, ProductName, Cate2, Cate3, TikingonCateReport) %>%
+  summarise(NmvQty = sum(NmvQty)) %>%
+  ungroup() %>%
+  spread(key = "OrderDate", value = "NmvQty", fill = 0)
+
+export_dir <- paste0(getwd(),"/OUTPUT/", FolderName)
+
+export(list("raw_data_SKU_ABC" = PerformerRankAllCatesExport,
+            "raw_data_SKU_segment" = BcgDataExport,
+            "raw_data_OOS" = OosAnalysisExport,
+            "raw_sales_nmv" = NmvSalesTimeSeriesExport,
+            "raw_sales_qty" = QtySalesTimeSeriesExport),
+       paste0(export_dir, "/", "raw_data_",ReviewCateReport[[1]],"_",ReviewRegion, ".xlsx"))
+```
+
+
+
+
+
+
