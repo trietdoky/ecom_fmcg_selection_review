@@ -1,0 +1,9 @@
+# ignore ALL .log files
+*.RData*
+*.Rhistory
+# ignore ALL files in ANY directory named temp
+DATA/
+00 Selection Review Older Versions/
+01 Feature Developement/
+OUTPUT/
+.Rproj.user/
